@@ -1,0 +1,142 @@
+---
+title: "Data624 Project2"
+author: "Nnaemezue Obi-Eyisi"
+date: "April 15, 2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+options(warn=-1)
+```
+
+
+Import Libraries
+```{r}
+library(xlsx)
+library(tidyr)
+library(earth)
+library(AppliedPredictiveModeling)
+library(caret)
+library(ggplot2)
+library(mice)
+library(missForest)
+library(randomForest)
+library(corrplot)
+library(xgboost)
+#install.packages("randomForest")
+```
+
+
+#Problem statement
+
+This is role playing.  I am your new boss.  I am in charge of production at ABC Beverage and you are a team of data scientists reporting to me.  My leadership has told me that new regulations are requiring us to understand our manufacturing process, the predictive factors and be able to report to them our predictive model of PH.
+
+Please use the historical data set I am providing.  Build and report the factors in BOTH a technical and non-technical report.  I like to use Word and Excel.  Please provide your non-technical report in a  business friendly readable document and your predictions in an Excel readable format.   The technical report should show clearly the models you tested and how you selected your final approach.
+
+Please submit both Rpubs links and .rmd files or other readable formats for technical and non-technical reports.  Also submit the excel file showing the prediction of your models for pH.
+
+```{r}
+
+Student_data <-  readxl::read_excel("C:/Users/Mezu/Documents/Data624/StudentData.xlsx")
+head(Student_data)
+
+summary(Student_data)
+
+```
+
+#Missing Values Analysis
+All predictors have missing values except  Brand Code,Pressure Vacuum, Air Pressurer
+
+Since our response has missing values let's filter it out
+```{r}
+Student_data_df <- subset(Student_data,is.na(`PH`) == FALSE)
+summary(Student_data_df)
+```
+
+Make Brand code a factor
+```{r}
+Student_data_df$`Brand Code` <- factor( Student_data_df$`Brand Code`)
+str(Student_data_df)
+
+```
+
+
+Distribution of Brand code
+```{r}
+barplot(prop.table(table(Student_data$`Brand Code`)))
+
+```
+Impute Missing values using Randomforest
+```{r}
+
+myvars <- names(Student_data_df) %in% c("PH")
+Student_data.imp <- Student_data_df[!myvars]
+#make Brand code a factor
+
+student_df_missForest <-rfImpute(Student_data.imp, Student_data_df$`PH`, iter=5, ntree=300)
+student_df_missForest <-rfImpute(PH ~ ., Student_data_df)
+#create new numeric labels for brand code
+student_df_missForest$`BrandCode_num` <- as.numeric(factor( student_df_missForest$`Brand Code`))
+
+summary(student_df_missForest2)
+
+```
+
+Let's check the correlation of the predictors
+```{r}
+myvars <- names(student_df_missForest) %in% c("Brand Code")
+student_df_missForest2<- student_df_missForest[, !myvars]
+student_df_missForest2_cor <-cor(student_df_missForest2)
+corrplot(student_df_missForest2_cor)
+```
+```{r}
+## 75% of the sample size
+smp_size <- floor(0.75 * nrow(student_df_missForest2))
+
+## set the seed to make your partition reproducible
+set.seed(123)
+train_ind <- sample(seq_len(nrow(student_df_missForest2)), size = smp_size)
+
+train <- student_df_missForest2[train_ind, ]
+test <-student_df_missForest2[-train_ind, ]
+TrainXtrans <- train[, !names(train) %in% "PH"]
+TrainY <- train[,  "PH"]
+
+TestXtrans <- test[, !names(train) %in% "PH"]
+TestY <- test[,  "PH"]
+ctrl <- trainControl(method = "cv", number = 10)
+```
+
+```{r}
+tuneGrid <- expand.grid(.nrounds=c(10,100,500),      # boosting iterations (trees)
+                        .max_depth=c(6, 10, 20),     # max tree depth
+                        .eta=c(0.3, 0.01, 0.1),      # learning rate
+                        .gamma=c(0, 5),              # minimum loss reduction
+                        .colsample_bytree=c(1, 0.5), # subsample ratio of columns
+                        .min_child_weight=c(1, 5),   # minimum sum of instance weight
+                        .subsample=c(0.1, 0.5))      # subsample ratio of rows
+
+# total models = 3*3*3*2*2*2*2*10 = 4320
+set.seed(1)
+bst <- train(x = TrainXtrans,
+             y = TrainY,
+             method = 'xgbTree',
+             tuneGrid = tuneGrid,
+             trControl = trainControl(method='cv'))
+```
+```{r}
+bst$bestTune
+```
+
+```{r}
+bst$finalModel
+```
+```{r}
+plot(varImp(bst))
+```
+```{r}
+xgboostTunePred <- predict(bst, newdata = TestXtrans)
+postResample(pred =xgboostTunePred, obs = TestY) 
+```
+
