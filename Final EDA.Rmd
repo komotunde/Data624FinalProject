@@ -10,7 +10,7 @@ knitr::opts_chunk$set(echo = TRUE)
 ```
 This is role playing.  I am your new boss.  I am in charge of production at ABC Beverage and you are a team of data scientists reporting to me.  My leadership has told me that new regulations are requiring us to understand our manufacturing process, the predictive factors and be able to report to them our predictive model of PH.
 
-Please use the historical data set I am providing.  Build and report the factors in BOTH a technical and non-technical report.  I like to use Word and Excel.  Please provide your non-technical report in a  business friendly readable document and your predictions in an Excel readable format.   The technical report should show clearly the models you tested and how you selected your final approach.
+Please use the historical data set I am providing.  Build and report the factors in BOTH a technical and non-technical report.I like to use Word and Excel.  Please provide your non-technical report in a  business friendly readable document and your predictions in an Excel readable format.   The technical report should show clearly the models you tested and how you selected your final approach.
 
 ```{r load data, echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
 library(readxl)
@@ -20,7 +20,7 @@ bev <- read_excel("FinalTrain.xlsx")
 
 ## EXCEL
 
-The first thing I did was to open the excel files for training and test data that was provided. This is just to get a general idea of what we are looking at. We first looked out the training data. We have 1 response variable (categorical goin from A -D) and 32 predictor variables(all numerical) with 2571 observation. One thing that I noticed immediately using the filter function was that we are missing about 120 of the response variable, "Brand Code". I have never encountered this before as we have typically been provided with complete response variables in the training data. We will come up with a plan to handle them as we move further. Below are the summary statistics we gathered. 
+The first thing I did was to open the excel files for training and test data that was provided. This is just to get a general idea of what we are looking at. We first looked out the training data. We have 1 response variable (PH) and 32 predictor variables(all numerical) with 2571 observation. One thing that I noticed immediately using the filter function was that we are missing about 120 of the predictor variable, "Brand Code". I also noticed that a couple of our response variable, PH was also missing. I was about 4 so I filtered out before loading the data. Below is the summary statistic we obtained.
 
 ```{r load statistics, echo=FALSE}
 library(knitr)
@@ -44,4 +44,10 @@ bev.des <- describe(bev, na.rm = TRUE, interp = FALSE, skew = TRUE, ranges = TRU
 kable(bev.des)
 ```
 
-The describe function from the psych package gives us a more descriptive summary statistic breakdown, inclduing skewness. We see that some variables are right skewed(PSC CO2, PSC Fill, and Temperature) while some are left skewed(Filler Speed, Carb Flow, and MFR). We will perform some transformations later. 
+The describe function from the psych package gives us a more descriptive summary statistic breakdown, inclduing skewness. We see that some variables are right skewed(PSC CO2, PSC Fill, and Temperature) while some are left skewed(Filler Speed, Carb Flow, and MFR). We will perform some transformations later. First, let's do some plots of our predictors.
+
+```{r plot predictors, echo=TRUE, message=FALSE, warning=FALSE, paged.print=FALSE}
+library(DataExplorer)
+DataExplorer::HistogramContinuous(bev)
+```
+
