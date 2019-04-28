@@ -24,7 +24,8 @@ library(missForest)
 library(randomForest)
 library(corrplot)
 library(xgboost)
-#install.packages("randomForest")
+library(DiagrammeR)
+#install.packages("stringi")
 ```
 
 
@@ -74,7 +75,7 @@ myvars <- names(Student_data_df) %in% c("PH")
 Student_data.imp <- Student_data_df[!myvars]
 #make Brand code a factor
 
-student_df_missForest <-rfImpute(Student_data.imp, Student_data_df$`PH`, iter=5, ntree=300)
+
 student_df_missForest <-rfImpute(PH ~ ., Student_data_df)
 #create new numeric labels for brand code
 student_df_missForest$`BrandCode_num` <- as.numeric(factor( student_df_missForest$`Brand Code`))
@@ -108,8 +109,19 @@ TestY <- test[,  "PH"]
 ctrl <- trainControl(method = "cv", number = 10)
 ```
 
+#Extreme Gradient Boost Modelling (XGBoost)
+
+
+EXtreme Gradient Boosting, was developed by Tianqi Chen and now is part of a wider collection of open-source libraries developed by the Distributed Machine Learning Community (DMLC). XGBoost is a scalable and accurate
+implementation of gradient boosting machines and it has proven to push the limits of computing
+power for boosted trees algorithms as it was built and developed for the sole purpose of model
+performance and computational speed. 
+
+It is based on Gradient Boosting alogorithm is a machine learning technique for regression and classification problems, which produces a prediction model in the form of an ensemble of weak prediction models, typically decision trees. It builds the model in a stage-wise fashion like other boosting methods do, and it generalizes them by allowing optimization of an arbitrary differentiable loss function.
+
+This model was choosen for this project due to it's unique qualities.
 ```{r}
-tuneGrid <- expand.grid(.nrounds=c(10,100,500),      # boosting iterations (trees)
+tuneGrid <- expand.grid(.nrounds=c(10,20,50),      # boosting iterations (trees)
                         .max_depth=c(6, 10, 20),     # max tree depth
                         .eta=c(0.3, 0.01, 0.1),      # learning rate
                         .gamma=c(0, 5),              # minimum loss reduction
@@ -132,6 +144,11 @@ bst$bestTune
 ```{r}
 bst$finalModel
 ```
+
+```{r}
+#xgb.plot.tree(model=bst$finalModel, trees=2)
+```
+
 ```{r}
 plot(varImp(bst))
 ```
@@ -139,4 +156,33 @@ plot(varImp(bst))
 xgboostTunePred <- predict(bst, newdata = TestXtrans)
 postResample(pred =xgboostTunePred, obs = TestY) 
 ```
+We clearly see that the most important predictors are Usage cont, Mini Flow, Oxygen Filter etc. We also got an RMSE of 0.1023
 
+
+MARS model
+MARS model Multivariate Adaptive Regression Splines (MARSplines) which is an implementation of techniques popularized by Friedman (1991) for solving regression-type problems. It's main purpose is to predict the values of a continuous dependent or outcome variable from a set of independent or predictor variables. The reason I chose the MARSplines is because it is a nonparametric regression procedure that makes no assumption about the underlying functional relationship between the dependent and independent variables. Since in this case it was not clear if there was linear relationship or not. It is great even in situations where the relationship between the predictors and the dependent variables is non-monotone and difficult to approximate with parametric models
+
+```{r}
+marsGrid <- expand.grid(.degree = 1:2, .nprune = 2:38) 
+set.seed(100)
+
+
+MarsModel <- train(x = TrainXtrans,
+             y = TrainY,
+              method = "earth",
+             tuneGrid = marsGrid,
+             trControl = trainControl(method='cv'))
+```
+
+```{r}
+MarsModel$bestTune
+
+plot(varImp(MarsModel))
+```
+```{r}
+MarsModelTunePred <- predict(MarsModel, newdata = TestXtrans)
+postResample(pred =MarsModelTunePred, obs = TestY) 
+```
+
+We can see that the RSME is lower than the Xgboost model.
+The most important predictors seem to be the MnfFlow, Brand_code, Airpressure
