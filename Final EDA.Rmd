@@ -10,7 +10,7 @@ knitr::opts_chunk$set(echo = TRUE)
 ```
 This is role playing.  I am your new boss.  I am in charge of production at ABC Beverage and you are a team of data scientists reporting to me.  My leadership has told me that new regulations are requiring us to understand our manufacturing process, the predictive factors and be able to report to them our predictive model of PH.
 
-Please use the historical data set I am providing.  Build and report the factors in BOTH a technical and non-technical report.I like to use Word and Excel.  Please provide your non-technical report in a  business friendly readable document and your predictions in an Excel readable format.   The technical report should show clearly the models you tested and how you selected your final approach.
+Please use the historical data set I am providing.  Build and report the factors in BOTH a technical and non-technical report.I like to use Word and Excel.  Please provide your non-technical report in a business friendly readable document and your predictions in an Excel readable format. The technical report should show clearly the models you tested and how you selected your final approach.
 
 ```{r load data, echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
 library(readxl)
@@ -20,7 +20,7 @@ bev <- read_excel("FinalTrain.xlsx")
 
 ## EXCEL
 
-The first thing I did was to open the excel files for training and test data that was provided. This is just to get a general idea of what we are looking at. We first looked out the training data. We have 1 response variable (PH) and 32 predictor variables(all numerical) with 2571 observation. One thing that I noticed immediately using the filter function was that we are missing about 120 of the predictor variable, "Brand Code". I also noticed that a couple of our response variable, PH was also missing. I was about 4 so I filtered out before loading the data. Below is the summary statistic we obtained.
+The first thing I did was to open the excel files for training and test data that was provided. This is just to get a general idea of what we are looking at. We first looked out the training data. We have 1 response variable (PH) and 32 predictor variables(all numerical) with 2571 observation. One thing that I noticed immediately using the filter function was that we are missing about 120 of the predictor variable, "Brand Code". I also noticed that a couple(4) of our response variable, PH was also missing. Below is the summary statistic we obtained.
 
 ```{r load statistics, echo=FALSE}
 library(knitr)
@@ -44,10 +44,39 @@ bev.des <- describe(bev, na.rm = TRUE, interp = FALSE, skew = TRUE, ranges = TRU
 kable(bev.des)
 ```
 
-The describe function from the psych package gives us a more descriptive summary statistic breakdown, inclduing skewness. We see that some variables are right skewed(PSC CO2, PSC Fill, and Temperature) while some are left skewed(Filler Speed, Carb Flow, and MFR). We will perform some transformations later. First, let's do some plots of our predictors.
+The describe function from the psych package gives us a more descriptive summary statistic breakdown, inclduing skewness. We see that some variables are right skewed(PSC CO2, PSC Fill, and Temperature) while some are left skewed(Filler Speed, Carb Flow, and MFR). We will perform some transformations later. First, let's do some plots|further exploration of our predictors.
 
 ```{r plot predictors, echo=TRUE, message=FALSE, warning=FALSE, paged.print=FALSE}
 library(DataExplorer)
-DataExplorer::HistogramContinuous(bev)
+create_report(bev, y = "PH")
+DataExplorer::plot_histogram(bev, nrow = 3L, ncol = 4L)
+```
+
+Looking at the plots, a few things jump out immediately at me. It doesn't appear that a lot of the variables have a normal distribution A phew of them have spikes that I think might be outliers and will be explored further. We will definitely need to do some pre-processing before throughing into a model. I'd like to take a look at the correlation plots to see if we have highly correlated date. We will remove those that are. 
+
+```{r correlation, message=TRUE, warning=TRUE, paged.print=TRUE}
+library(ggplot2)
+plot_correlation(bev, type = c("all", "discrete", "continuous"),
+  maxcat = 20L, cor_args = list(), geom_text_args = list(),
+  title = NULL, ggtheme = theme_gray(),
+  theme_config = list(legend.position = "bottom", axis.text.x =
+  element_text(angle = 90)))
+```
+
+
+```{r split data, message=TRUE, warning=TRUE, paged.print=TRUE}
+library(caret)
+set.seed(123)
+sample <- sample.int(n = nrow(bev), size = floor( .75 * nrow(bev)), replace = FALSE)
+bev_train <- bev[sample, ]
+bev_test <- bev[-sample, ]
+
+myControl <- trainControl(method = 'cv', number = 5, verboseIter = FALSE, savePredictions = TRUE, allowParallel = TRUE)
+```
+
+
+```{r GLM MODEL, message=TRUE, warning=TRUE, paged.print=TRUE}
+set.seed(456)
+
 ```
 
