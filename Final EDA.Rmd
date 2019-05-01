@@ -20,7 +20,7 @@ bev <- read_excel("FinalTrain.xlsx")
 
 ## EXCEL
 
-The first thing I did was to open the excel files for training and test data that was provided. This is just to get a general idea of what we are looking at. We first looked out the training data. We have 1 response variable (PH) and 32 predictor variables(all numerical) with 2571 observation. One thing that I noticed immediately using the filter function was that we are missing about 120 of the predictor variable, "Brand Code". I also noticed that a couple(4) of our response variable, PH was also missing. Below is the summary statistic we obtained.
+The first thing I did was to open the excel files for training and test data that was provided. This is just to get a general idea of what we are looking at. We first looked out the training data. We noticed that the column names had spaces so we formatted as xxx.xxxx, for easier acces to the columns. We have 1 response variable (PH) and 32 predictor variables(all numerical) with 2571 observation. One thing that I noticed immediately using the filter function was that we are missing about 120 of the predictor variable, "Brand Code". I also noticed that a couple(4) of our response variable, PH was also missing. Below is the summary statistic we obtained.
 
 ```{r load statistics, echo=FALSE}
 library(knitr)
@@ -28,14 +28,9 @@ training.summary <- read_excel("FinalTrainStats.xlsx")
 kable(training.summary)
 ```
 
-Aside from the missing response variables, there are quite a bit of the predictor variables with missing values. MFR has a total of 212 missing values and some like "Pressure Vacuum" and "Air Pressure" have no missing values. We will go ahead a impute the missing values for the predictor variables. There are a few variables that I worry may have outliers because of the range between the min and the max. One such variable is "Carb Flow", with a min of 26 and max of 5104. Another would be MFR. We will do some plots to get a visual of our data. 
+Aside from the missing response variables, there are quite a bit of the predictor variables with missing values. MFR has a total of 212 missing values and some like "Pressure Vacuum" and "Air Pressure" have no missing values. We will go ahead a impute the missing values for the predictor variables. There are a few variables that I worry may have outliers because of the range between the min and the max. One such variable is "Carb Flow", with a min of 26 and max of 5104. Another would be MFR. 
 
-```{r missing data visual, echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
-library(mice)
-library(VIM)
-md.pattern(bev)
-aggr_plot <- aggr(bev, col=c('navyblue','red'), numbers = TRUE, sortVars = TRUE, labels = colnames(bev), cex.axis = .7, gap = 3, ylab =c ("Histogram of missing data","Pattern"))
-```
+`
 
 
 ```{r bev describe, echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
@@ -48,7 +43,7 @@ The describe function from the psych package gives us a more descriptive summary
 
 ```{r plot predictors, echo=TRUE, message=FALSE, warning=FALSE, paged.print=FALSE}
 library(DataExplorer)
-create_report(bev, y = "PH")
+#create_report(bev, y = "PH")
 DataExplorer::plot_histogram(bev, nrow = 3L, ncol = 4L)
 ```
 
@@ -63,6 +58,22 @@ plot_correlation(bev, type = c("all", "discrete", "continuous"),
   element_text(angle = 90)))
 ```
 
+As we stated earlier, Brand Code was missing about 120 variables. We will replace the blanks(N/A's) with U for UNKNOWN. We will then use the mice package to impute the remaining missing values.
+
+```{r imputations, message=TRUE, warning=TRUE, paged.print=TRUE}
+library(mice)
+library(VIM)
+md.pattern(bev)
+aggr_plot <- aggr(bev, col=c('navyblue','red'), numbers = TRUE, sortVars = TRUE, labels = colnames(bev), cex.axis = .7, gap = 3, ylab =c ("Histogram of missing data","Pattern"))
+
+#bev$Brand.Code[bev$Brand.Code == ""] <- "U"
+
+bev.imp <- mice(bev, m =3, maxit =3, print = FALSE, seed = 234)
+densityplot(bev.imp)
+
+bev <- complete(bev.imp)
+```
+Unfortunately, the code to replace the blanks in the Brand.Code column so we went back to Excel to help us out. We filterd for the blanks in the column and filled in a "U". 
 
 ```{r split data, message=TRUE, warning=TRUE, paged.print=TRUE}
 library(caret)
@@ -77,6 +88,34 @@ myControl <- trainControl(method = 'cv', number = 5, verboseIter = FALSE, savePr
 
 ```{r GLM MODEL, message=TRUE, warning=TRUE, paged.print=TRUE}
 set.seed(456)
+glm.model <- train(PH ~., data = bev_train, metric = "RMSE", method = "glm", preProcess = c("center", "scale", "BoxCox"), trControl = myControl)
 
+glm.rmse <- glm.model$results$RMSE
+
+paste0("The RMSE value for the GLM model is ", glm.rmse)
+```
+
+```{r glmnet model, message=TRUE, warning=TRUE, paged.print=TRUE}
+set.seed(789)
+glmnet.model <- train(PH ~., data = bev_train, metric = "RMSE", method = "glmnet", preProcess = c("center", "scale", "BoxCox"), trControl = myControl)
+
+glmnet.model
+```
+The best RMSE value for the GLMNET model is when alpha = 1 and lambda = .0001541044, .1328577. 
+
+We will next try partial least squares regression model.
+```{r partial least squares, message=TRUE, warning=TRUE, paged.print=TRUE}
+pls.bev <- train(PH ~., data = bev_train, metric = "RMSE", method = "pls", tunelength = 15, preProcess = c("center", "scale", "BoxCox"), trControl = myControl)
+
+pls.bev
+```
+The results show the RMSE value of .1390284, when ncomp is 3. We will lastly try a random forest model. 
+
+```{r random forest, message=TRUE, warning=TRUE, paged.print=TRUE}
+ctrl <- trainControl(method = "repeatedcv", number = 5, repeats = 2, search = "random", allowParallel = TRUE)
+mtry <- sqrt(ncol(bev_train))
+
+set.seed(321)
+ranfor.bev <- 
 ```
 
