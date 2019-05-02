@@ -20,7 +20,7 @@ bev <- read_excel("FinalTrain.xlsx")
 
 ## EXCEL
 
-The first thing I did was to open the excel files for training and test data that was provided. This is just to get a general idea of what we are looking at. We first looked out the training data. We noticed that the column names had spaces so we formatted as xxx.xxxx, for easier acces to the columns. We have 1 response variable (PH) and 32 predictor variables(all numerical) with 2571 observation. One thing that I noticed immediately using the filter function was that we are missing about 120 of the predictor variable, "Brand Code". I also noticed that a couple(4) of our response variable, PH was also missing. Below is the summary statistic we obtained.
+The first thing I did was to open the excel files for training and test data that was provided. This is just to get a general idea of what we are looking at. We first looked out the training data. We noticed that the column names had spaces so we formatted as xxx.xxxx, for easier acces to the columns. We have 1 response variable (PH) and 32 predictor variables(all numerical) with 2571 observation. One thing that I noticed immediately using the filter function was that we are missing about 120 of the predictor variable, "Brand Code". I also noticed that a couple(4) of our response variable, PH was also missing. In addition to the 4 missing entries, we realized that it may be benficial to convert PH from numerical to catergorical based on the value. We know that anything below 7 is acidic, while anything above 7 is basic, although we realize that are data ranges from 7 up.  Below is the summary statistic we obtained.
 
 ```{r load statistics, echo=FALSE}
 library(knitr)
@@ -30,16 +30,13 @@ kable(training.summary)
 
 Aside from the missing response variables, there are quite a bit of the predictor variables with missing values. MFR has a total of 212 missing values and some like "Pressure Vacuum" and "Air Pressure" have no missing values. We will go ahead a impute the missing values for the predictor variables. There are a few variables that I worry may have outliers because of the range between the min and the max. One such variable is "Carb Flow", with a min of 26 and max of 5104. Another would be MFR. 
 
-`
-
-
 ```{r bev describe, echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
 library(psych)
 bev.des <- describe(bev, na.rm = TRUE, interp = FALSE, skew = TRUE, ranges = TRUE, trim = .1, type = 3, check = TRUE, fast = FALSE, quant = c(.25,.75), IQR = TRUE)
 kable(bev.des)
 ```
 
-The describe function from the psych package gives us a more descriptive summary statistic breakdown, inclduing skewness. We see that some variables are right skewed(PSC CO2, PSC Fill, and Temperature) while some are left skewed(Filler Speed, Carb Flow, and MFR). We will perform some transformations later. First, let's do some plots|further exploration of our predictors.
+The describe function from the psych package gives us a more descriptive summary statistic breakdown, inclduing skewness. We see that some variables are right skewed(PSC CO2, PSC Fill, and Temperature) while some are left skewed(Filler Speed, Carb Flow, and MFR). We will perform some transformations later to address the skewness of the data. First, let's do some plots|further exploration of our predictors.
 
 ```{r plot predictors, echo=TRUE, message=FALSE, warning=FALSE, paged.print=FALSE}
 library(DataExplorer)
@@ -73,10 +70,23 @@ densityplot(bev.imp)
 
 bev <- complete(bev.imp)
 ```
-Unfortunately, the code to replace the blanks in the Brand.Code column so we went back to Excel to help us out. We filterd for the blanks in the column and filled in a "U". 
+Unfortunately, the code to replace the blanks in the Brand.Code column did not work as planned so we went back to Excel to help us out. We filterd for the blanks in the column and manually replaced with a "U". Next, lets delve into whether we have zero-variance variables or not. Zero-variance variables are those where the percentage of unique values is less than 10%. 
+
+```{r near 0 variance, message=TRUE, warning=TRUE, paged.print=TRUE}
+library(caret)
+
+zero <- nearZeroVar(bev, saveMetrics = TRUE)
+str(zero, vec.len = 3)
+zero$nzv
+
+zero[zero[, "nzv"] > 0, ]
+```
+
+We notice that here is one column where we are getting a true for near zero variance(nzv). We looked further to see which variable it was and to see whether we should remove the variable or not. Hyd.Pressure1 was the only variable where the percent of unique entries is 9.53 percent, very close to the 10 percent cutoff. After much debate, we decided to keep the variable for now. Next, we will convert the Brand.Code column to a factor with 5 levels, then split our data. 
 
 ```{r split data, message=TRUE, warning=TRUE, paged.print=TRUE}
-library(caret)
+bev$Brand.Code <- factor(bev$Brand.Code)
+
 set.seed(123)
 sample <- sample.int(n = nrow(bev), size = floor( .75 * nrow(bev)), replace = FALSE)
 bev_train <- bev[sample, ]
@@ -116,6 +126,78 @@ ctrl <- trainControl(method = "repeatedcv", number = 5, repeats = 2, search = "r
 mtry <- sqrt(ncol(bev_train))
 
 set.seed(321)
-ranfor.bev <- 
+ranfor.bev <- train(PH ~., data = bev_train, metric = "RMSE", method = "rf", tunelength = 5, trControl = ctrl, importance = T)
+ranfor.bev
 ```
 
+EXtreme Gradient Boosting, was developed by Tianqi Chen and now is part of a wider collection of open-source libraries developed by the Distributed Machine Learning Community (DMLC). XGBoost is a scalable and accurate implementation of gradient boosting machines and it has proven to push the limits of computing power for boosted trees algorithms as it was built and developed for the sole purpose of model performance and computational speed. 
+
+It is based on Gradient Boosting alogorithm is a machine learning technique for regression and classification problems, which produces a prediction model in the form of an ensemble of weak prediction models, typically decision trees. It builds the model in a stage-wise fashion like other boosting methods do, and it generalizes them by allowing optimization of an arbitrary differentiable loss function.
+
+This model was choosen for this project due to it's unique qualities
+.
+```{r boost, message=TRUE, warning=TRUE, paged.print=TRUE}
+tuneGrid <- expand.grid(.nrounds=c(10,20,50),      # boosting iterations (trees)
+                        .max_depth=c(6, 10, 20),     # max tree depth
+                        .eta=c(0.3, 0.01, 0.1),      # learning rate
+                        .gamma=c(0, 5),              # minimum loss reduction
+                        .colsample_bytree=c(1, 0.5), # subsample ratio of columns
+                        .min_child_weight=c(1, 5),   # minimum sum of instance weight
+                        .subsample=c(0.1, 0.5))      # subsample ratio of rows
+# total models = 3*3*3*2*2*2*2*10 = 4320
+set.seed(1)
+bst <- train(x = bev_train,
+             y = bev_train$PH,
+             method = 'xgbTree',
+             tuneGrid = tuneGrid,
+             trControl = trainControl(method='cv'))
+```
+
+```{r boost results}
+bst$bestTune
+```
+
+```{r}
+bst$finalModel
+```
+
+```{r}
+#xgb.plot.tree(model=bst$finalModel, trees=2)
+```
+
+```{r boost variable importance}
+plot(varImp(bst))
+```
+
+```{r}
+xgboostTunePred <- predict(bst, newdata = bev_test)
+postResample(pred =xgboostTunePred, obs = bev_test$PH) 
+```
+We clearly see that the most important predictors are Usage cont, Mini Flow, Oxygen Filter etc. We also got an RMSE of 0.1023
+
+
+MARS model
+MARS model Multivariate Adaptive Regression Splines (MARSplines) which is an implementation of techniques popularized by Friedman (1991) for solving regression-type problems. It's main purpose is to predict the values of a continuous dependent or outcome variable from a set of independent or predictor variables. The reason I chose the MARSplines is because it is a nonparametric regression procedure that makes no assumption about the underlying functional relationship between the dependent and independent variables. Since in this case it was not clear if there was linear relationship or not. It is great even in situations where the relationship between the predictors and the dependent variables is non-monotone and difficult to approximate with parametric models
+
+```{r MARS model}
+marsGrid <- expand.grid(.degree = 1:2, .nprune = 2:38) 
+set.seed(100)
+MarsModel <- train(x = bev_train,
+             y = bev_train$PH,
+              method = "earth",
+             tuneGrid = marsGrid,
+             trControl = trainControl(method='cv'))
+```
+
+```{r}
+MarsModel$bestTune
+plot(varImp(MarsModel))
+```
+
+```{r}
+MarsModelTunePred <- predict(MarsModel, newdata = bev_test)
+postResample(pred =MarsModelTunePred, obs = bev_test$PH) 
+```
+
+We can see that the RSME is lower than the Xgboost model.
+The most important predictors seem to be the MnfFlow, Brand_code, Airpressure
