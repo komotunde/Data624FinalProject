@@ -60,22 +60,32 @@ As we stated earlier, Brand Code was missing about 120 variables. We will replac
 ```{r imputations, message=TRUE, warning=TRUE, paged.print=TRUE}
 library(mice)
 library(VIM)
+library(missForest)
 md.pattern(bev)
 aggr_plot <- aggr(bev, col=c('navyblue','red'), numbers = TRUE, sortVars = TRUE, labels = colnames(bev), cex.axis = .7, gap = 3, ylab =c ("Histogram of missing data","Pattern"))
 
-#bev$Brand.Code[bev$Brand.Code == ""] <- "U"
+bev$`Brand Code` <- factor(bev$`Brand Code`)
 
-bev.imp <- mice(bev, m =3, maxit =3, print = FALSE, seed = 234)
-densityplot(bev.imp)
+bev <- subset(bev ,is.na(`PH`) == FALSE)
 
-bev <- complete(bev.imp)
+myvars <- names(bev) %in% c("PH")
+bev.imp <- bev[!myvars]
+#make Brand code a factor
+bev.imp.missForest <- rfImpute(PH ~ ., bev)
+#create new numeric labels for brand code
+#student_df_missForest$`BrandCode_num` <- as.numeric(factor( student_df_missForest$`Brand Code`))
+
+#bev.imp.missForest$`Brand Code`[bev.imp.missForest$`Brand Code` == ""] <- "U"
+
+#bev.imp <- mice(bev, m =3, maxit =3, print = FALSE, seed = 234)
+#densityplot(bev.imp.missForest)
 ```
 Unfortunately, the code to replace the blanks in the Brand.Code column did not work as planned so we went back to Excel to help us out. We filterd for the blanks in the column and manually replaced with a "U". Next, lets delve into whether we have zero-variance variables or not. Zero-variance variables are those where the percentage of unique values is less than 10%. 
 
 ```{r near 0 variance, message=TRUE, warning=TRUE, paged.print=TRUE}
 library(caret)
 
-zero <- nearZeroVar(bev, saveMetrics = TRUE)
+zero <- nearZeroVar(bev.imp.missForest, saveMetrics = TRUE)
 str(zero, vec.len = 3)
 zero$nzv
 
@@ -85,12 +95,11 @@ zero[zero[, "nzv"] > 0, ]
 We notice that here is one column where we are getting a true for near zero variance(nzv). We looked further to see which variable it was and to see whether we should remove the variable or not. Hyd.Pressure1 was the only variable where the percent of unique entries is 9.53 percent, very close to the 10 percent cutoff. After much debate, we decided to keep the variable for now. Next, we will convert the Brand.Code column to a factor with 5 levels, then split our data. 
 
 ```{r split data, message=TRUE, warning=TRUE, paged.print=TRUE}
-bev$Brand.Code <- factor(bev$Brand.Code)
 
 set.seed(123)
-sample <- sample.int(n = nrow(bev), size = floor( .75 * nrow(bev)), replace = FALSE)
-bev_train <- bev[sample, ]
-bev_test <- bev[-sample, ]
+sample <- sample.int(n = nrow(bev.imp.missForest), size = floor( .75 * nrow(bev.imp.missForest)), replace = FALSE)
+bev_train <- bev.imp.missForest[sample, ]
+bev_test <- bev.imp.missForest[-sample, ]
 
 myControl <- trainControl(method = 'cv', number = 5, verboseIter = FALSE, savePredictions = TRUE, allowParallel = TRUE)
 ```
