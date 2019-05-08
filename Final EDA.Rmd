@@ -46,7 +46,7 @@ DataExplorer::plot_histogram(bev, nrow = 3L, ncol = 4L)
 
 Looking at the plots, a few things jump out immediately at me. It doesn't appear that a lot of the variables have a normal distribution A phew of them have spikes that I think might be outliers and will be explored further. We will definitely need to do some pre-processing before throughing into a model. I'd like to take a look at the correlation plots to see if we have highly correlated date. We will remove those that are. 
 
-```{r correlation, message=TRUE, warning=TRUE, paged.print=TRUE}
+```{r correlation, message=FALSE, warning=FALSE, paged.print=FALSE}
 library(ggplot2)
 plot_correlation(bev, type = c("all", "discrete", "continuous"),
   maxcat = 20L, cor_args = list(), geom_text_args = list(),
@@ -57,7 +57,7 @@ plot_correlation(bev, type = c("all", "discrete", "continuous"),
 
 As we stated earlier, Brand Code was missing about 120 variables. We will replace the blanks(N/A's) with U for UNKNOWN. We will then use the mice package to impute the remaining missing values.
 
-```{r imputations, message=TRUE, warning=TRUE, paged.print=TRUE}
+```{r imputations, message=FALSE, warning=FALSE, paged.print=FALSE}
 library(mice)
 library(VIM)
 library(missForest)
@@ -82,7 +82,7 @@ bev.imp.missForest <- rfImpute(PH ~ ., bev)
 ```
 Unfortunately, the code to replace the blanks in the Brand.Code column did not work as planned so we went back to Excel to help us out. We filterd for the blanks in the column and manually replaced with a "U". Next, lets delve into whether we have zero-variance variables or not. Zero-variance variables are those where the percentage of unique values is less than 10%. 
 
-```{r near 0 variance, message=TRUE, warning=TRUE, paged.print=TRUE}
+```{r near 0 variance, message=FALSE, warning=FALSE, paged.print=FALSE}
 library(caret)
 
 zero <- nearZeroVar(bev.imp.missForest, saveMetrics = TRUE)
@@ -94,50 +94,82 @@ zero[zero[, "nzv"] > 0, ]
 
 We notice that here is one column where we are getting a true for near zero variance(nzv). We looked further to see which variable it was and to see whether we should remove the variable or not. Hyd.Pressure1 was the only variable where the percent of unique entries is 9.53 percent, very close to the 10 percent cutoff. After much debate, we decided to keep the variable for now. Next, we will convert the Brand.Code column to a factor with 5 levels, then split our data. 
 
-```{r split data, message=TRUE, warning=TRUE, paged.print=TRUE}
-
+```{r split data, message=FALSE, warning=FALSE, paged.print=FALSE}
 set.seed(123)
-sample <- sample.int(n = nrow(bev.imp.missForest), size = floor( .75 * nrow(bev.imp.missForest)), replace = FALSE)
-bev_train <- bev.imp.missForest[sample, ]
-bev_test <- bev.imp.missForest[-sample, ]
+myvars <- names(bev.imp.missForest) %in% c("Brand Code")
+bev.imp.missForest2<- bev.imp.missForest[, !myvars]
 
-myControl <- trainControl(method = 'cv', number = 5, verboseIter = FALSE, savePredictions = TRUE, allowParallel = TRUE)
+
+## 75% of the sample size
+smp_size <- floor(0.75 * nrow(bev.imp.missForest))
+## set the seed to make your partition reproducible
+set.seed(123)
+train_ind <- sample(seq_len(nrow(bev.imp.missForest)), size = smp_size)
+bev.train <- bev.imp.missForest2[train_ind, ]
+bev.test <- bev.imp.missForest2[-train_ind, ]
+bev.trainX <- bev.train[, !names(bev.train) %in% "PH"]
+bev.trainY <- bev.train[,  "PH"]
+bev.testX <- bev.test[, !names(bev.train) %in% "PH"]
+bev.testY <- bev.test[,  "PH"]
+ctrl <- trainControl(method = "cv", number = 10)
 ```
 
 
-```{r GLM MODEL, message=TRUE, warning=TRUE, paged.print=TRUE}
+```{r GLM MODEL, message=FALSE, warning=FALSE, paged.print=FALSE}
 set.seed(456)
-glm.model <- train(PH ~., data = bev_train, metric = "RMSE", method = "glm", preProcess = c("center", "scale", "BoxCox"), trControl = myControl)
+glm.model <- train(PH ~., data = bev.train, metric = "RMSE", method = "glm", preProcess = c("center", "scale", "BoxCox"), trControl = ctrl)
 
-glm.rmse <- glm.model$results$RMSE
+glm.predict <- predict(glm.model, newdata = bev.test)
+pre.eval <- data.frame(obs = bev.testY, pred = glm.predict)
+
+glm.results <- data.frame(defaultSummary(pre.eval))
+glm.rmse <- glm.results[1, 1]
 
 paste0("The RMSE value for the GLM model is ", glm.rmse)
 ```
 
-```{r glmnet model, message=TRUE, warning=TRUE, paged.print=TRUE}
+```{r glmnet model, message=FALSE, warning=FALSE, paged.print=FALSE}
 set.seed(789)
-glmnet.model <- train(PH ~., data = bev_train, metric = "RMSE", method = "glmnet", preProcess = c("center", "scale", "BoxCox"), trControl = myControl)
+glmnet.model <- train(PH ~., data = bev.train, metric = "RMSE", method = "glmnet", preProcess = c("center", "scale", "BoxCox"), trControl = myControl)
 
-glmnet.model
+glmnet.predict <- predict(glmnet.model, newdata = bev.test)
+pre.eval2 <- data.frame(obs = bev.testY, pred = glmnet.predict)
+
+glmnet.results <- data.frame(defaultSummary(pre.eval2))
+glmnet.rmse <- glmnet.results[1, 1]
+
+paste0("The RMSE value for the GLMNET model is ", glmnet.rmse)
 ```
-The best RMSE value for the GLMNET model is when alpha = 1 and lambda = .0001541044, .1328577. 
 
 We will next try partial least squares regression model.
-```{r partial least squares, message=TRUE, warning=TRUE, paged.print=TRUE}
-pls.bev <- train(PH ~., data = bev_train, metric = "RMSE", method = "pls", tunelength = 15, preProcess = c("center", "scale", "BoxCox"), trControl = myControl)
+```{r partial least squares, message=FALSE, warning=FALSE, paged.print=FALSE}
+library(pls)
+pls.bev <- train(PH ~., data = bev.train, metric = "RMSE", method = "pls", tunelength = 15, preProcess = c("center", "scale", "BoxCox"), trControl = myControl)
+pls.pred <- predict(pls.bev, bev.test)
 
-pls.bev
+pre.eval3 <- data.frame(obs = bev.testY, pred = pls.pred)
+
+defaultSummary(pre.eval3)
+
+pls.results <- data.frame(defaultSummary(pre.eval3))
+pls.rmse <- pls.results[1, 1]
+
+paste0("The RMSE value for the PLS model is ", pls.rmse)
 ```
-The results show the RMSE value of .1390284, when ncomp is 3. We will lastly try a random forest model. 
 
-```{r random forest, message=TRUE, warning=TRUE, paged.print=TRUE}
-ctrl <- trainControl(method = "repeatedcv", number = 5, repeats = 2, search = "random", allowParallel = TRUE)
-mtry <- sqrt(ncol(bev_train))
+```{r random forest, message=FALSE, warning=FALSE, paged.print=FALSE}
+ctrl2 <- trainControl(method = "repeatedcv", number = 5, repeats = 2, search = "random", allowParallel = TRUE)
+mtry <- sqrt(ncol(bev.train))
 
 set.seed(321)
-ranfor.bev <- train(PH ~., data = bev_train, metric = "RMSE", method = "rf", tunelength = 5, trControl = ctrl, importance = T)
+ranfor.bev <- train(PH ~., data = bev.train, metric = "RMSE", method = "rf", tunelength = 5, trControl = ctrl2, importance = T)
+
+varImp(ranfor.bev)
 ranfor.bev
 ```
+
+From the random forest model, we see that the variables that are most important are:
++ 
 
 EXtreme Gradient Boosting, was developed by Tianqi Chen and now is part of a wider collection of open-source libraries developed by the Distributed Machine Learning Community (DMLC). XGBoost is a scalable and accurate implementation of gradient boosting machines and it has proven to push the limits of computing power for boosted trees algorithms as it was built and developed for the sole purpose of model performance and computational speed. 
 
@@ -155,8 +187,8 @@ tuneGrid <- expand.grid(.nrounds=c(10,20,50),      # boosting iterations (trees)
                         .subsample=c(0.1, 0.5))      # subsample ratio of rows
 # total models = 3*3*3*2*2*2*2*10 = 4320
 set.seed(1)
-bst <- train(x = bev_train,
-             y = bev_train$PH,
+bst <- train(x = bev.train,
+             y = bev.train$PH,
              method = 'xgbTree',
              tuneGrid = tuneGrid,
              trControl = trainControl(method='cv'))
@@ -179,8 +211,8 @@ plot(varImp(bst))
 ```
 
 ```{r}
-xgboostTunePred <- predict(bst, newdata = bev_test)
-postResample(pred =xgboostTunePred, obs = bev_test$PH) 
+xgboostTunePred <- predict(bst, newdata = bev.test)
+postResample(pred =xgboostTunePred, obs = bev.test$PH) 
 ```
 We clearly see that the most important predictors are Usage cont, Mini Flow, Oxygen Filter etc. We also got an RMSE of 0.1023
 
@@ -191,8 +223,8 @@ MARS model Multivariate Adaptive Regression Splines (MARSplines) which is an imp
 ```{r MARS model}
 marsGrid <- expand.grid(.degree = 1:2, .nprune = 2:38) 
 set.seed(100)
-MarsModel <- train(x = bev_train,
-             y = bev_train$PH,
+MarsModel <- train(x = bev.train,
+             y = bev.train$PH,
               method = "earth",
              tuneGrid = marsGrid,
              trControl = trainControl(method='cv'))
@@ -204,8 +236,8 @@ plot(varImp(MarsModel))
 ```
 
 ```{r}
-MarsModelTunePred <- predict(MarsModel, newdata = bev_test)
-postResample(pred =MarsModelTunePred, obs = bev_test$PH) 
+MarsModelTunePred <- predict(MarsModel, newdata = bev.test)
+postResample(pred =MarsModelTunePred, obs = bev.test$PH) 
 ```
 
 We can see that the RSME is lower than the Xgboost model.
