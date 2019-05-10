@@ -1,0 +1,294 @@
+---
+title: "DATA 624 - Final Project EDA"
+author: "Oluwakemi Omotunde"
+date: "April 21, 2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+This is role playing.  I am your new boss.  I am in charge of production at ABC Beverage and you are a team of data scientists reporting to me.  My leadership has told me that new regulations are requiring us to understand our manufacturing process, the predictive factors and be able to report to them our predictive model of PH.
+
+Please use the historical data set I am providing.  Build and report the factors in BOTH a technical and non-technical report.I like to use Word and Excel.  Please provide your non-technical report in a business friendly readable document and your predictions in an Excel readable format. The technical report should show clearly the models you tested and how you selected your final approach.
+
+```{r load data, echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+library(readxl)
+bev <- read.csv("https://raw.githubusercontent.com/komotunde/Data624FinalProject/master/FinalTrainingData.csv",na.strings=c("","NA"))
+
+```
+
+
+## EXCEL
+
+The first thing I did was to open the excel files for training and test data that was provided. This is just to get a general idea of what we are looking at. We first looked out the training data. We noticed that the column names had spaces so we formatted as xxx.xxxx, for easier acces to the columns. We have 1 response variable (PH) and 32 predictor variables(all numerical) with 2571 observation. One thing that I noticed immediately using the filter function was that we are missing about 120 of the predictor variable, "Brand Code". I also noticed that a couple(4) of our response variable, PH was also missing. In addition to the 4 missing entries, we realized that it may be benficial to convert PH from numerical to catergorical based on the value. We know that anything below 7 is acidic, while anything above 7 is basic, although we realize that are data ranges from 7 up.  Below is the summary statistic we obtained.
+
+```{r load statistics, echo=FALSE}
+library(knitr)
+training.summary <- read.csv("https://raw.githubusercontent.com/komotunde/Data624FinalProject/master/FinalTrainingData.csv",na.strings=c("","NA"))
+kable(training.summary)
+```
+
+Aside from the missing response variables, there are quite a bit of the predictor variables with missing values. MFR has a total of 212 missing values and some like "Pressure Vacuum" and "Air Pressure" have no missing values. We will go ahead a impute the missing values for the predictor variables. There are a few variables that I worry may have outliers because of the range between the min and the max. One such variable is "Carb Flow", with a min of 26 and max of 5104. Another would be MFR. 
+
+```{r bev describe, echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+library(psych)
+bev.des <- describe(bev, na.rm = TRUE, interp = FALSE, skew = TRUE, ranges = TRUE, trim = .1, type = 3, check = TRUE, fast = FALSE, quant = c(.25,.75), IQR = TRUE)
+kable(bev.des)
+```
+
+The describe function from the psych package gives us a more descriptive summary statistic breakdown, inclduing skewness. We see that some variables are right skewed(PSC CO2, PSC Fill, and Temperature) while some are left skewed(Filler Speed, Carb Flow, and MFR). We will perform some transformations later to address the skewness of the data. First, let's do some plots|further exploration of our predictors.
+
+```{r plot predictors, echo=TRUE, message=FALSE, warning=FALSE, paged.print=FALSE}
+library(DataExplorer)
+#create_report(bev, y = "PH")
+DataExplorer::plot_histogram(bev, nrow = 3L, ncol = 4L)
+```
+
+Looking at the plots, a few things jump out immediately at me. It doesn't appear that a lot of the variables have a normal distribution A phew of them have spikes that I think might be outliers and will be explored further. We will definitely need to do some pre-processing before throughing into a model. I'd like to take a look at the correlation plots to see if we have highly correlated date. We will remove those that are. 
+
+```{r correlation, message=FALSE, warning=FALSE, paged.print=FALSE}
+library(ggplot2)
+plot_correlation(bev, type = c("all", "discrete", "continuous"),
+  maxcat = 20L, cor_args = list(), geom_text_args = list(),
+  title = NULL, ggtheme = theme_gray(),
+  theme_config = list(legend.position = "bottom", axis.text.x =
+  element_text(angle = 90)))
+```
+
+As we stated earlier, Brand Code was missing about 120 variables. We first converted the Brand.Code predictor to factors so that it would be compatible for a random forest imputation. 
+
+We then filtered out the subset of records (4) with a missing response (PH) values and imputed the remaining missing values using the random forest imputation. 
+
+```{r imputations, message=FALSE, warning=FALSE, paged.print=FALSE}
+library(mice)
+library(VIM)
+library(missForest)
+md.pattern(bev)
+aggr_plot <- aggr(bev, col=c('navyblue','red'), numbers = TRUE, sortVars = TRUE, labels = colnames(bev), cex.axis = .7, gap = 3, ylab =c ("Histogram of missing data","Pattern"))
+#make Brand code a factor
+bev$`Brand.Code` <- factor(bev$`Brand.Code`)
+#Remove missing response rows, not suitable for model training
+bev <- subset(bev ,is.na(`PH`) == FALSE)
+#Remove PH from the imputation dataset so that it won't influence the imputation algorithm and bias the model test
+myvars <- names(bev) %in% c("PH")
+bev.imp <- bev[!myvars]
+summary(bev.imp)
+#use MissForest to impute because it does not need the response (PH). We do this to avoid bias when we impute the test set
+bev.imp.missForest <-missForest(bev.imp)
+bev.imp.missForest<-bev.imp.missForest$ximp
+#add back the PH variable to the data frame
+bev.imp.missForest$PH <- bev$PH
+summary(bev.imp.missForest)
+#bev.imp.missForest <- rfImpute(PH ~ ., bev)
+#create new numeric labels for brand code
+#student_df_missForest$`BrandCode_num` <- as.numeric(factor( student_df_missForest$`Brand Code`))
+#bev.imp.missForest$`Brand Code`[bev.imp.missForest$`Brand Code` == ""] <- "U"
+#bev.imp <- mice(bev, m =3, maxit =3, print = FALSE, seed = 234)
+#densityplot(bev.imp.missForest)
+```
+
+ Next, lets delve into whether we have zero-variance variables or not. Zero-variance variables are those where the percentage of unique values is less than 10%. 
+
+```{r near 0 variance, message=FALSE, warning=FALSE, paged.print=FALSE}
+library(caret)
+zero <- nearZeroVar(bev.imp.missForest, saveMetrics = TRUE)
+str(zero, vec.len = 3)
+zero$nzv
+zero[zero[, "nzv"] > 0, ]
+```
+
+We notice that here is one column where we are getting a true for near zero variance(nzv). We looked further to see which variable it was and to see whether we should remove the variable or not. Hyd.Pressure1 was the only variable where the percent of unique entries is 9.53 percent, very close to the 10 percent cutoff. After much debate, we decided to keep the variable for now. Next, we will split our data. 
+
+```{r split data, message=FALSE, warning=FALSE, paged.print=FALSE}
+#set.seed(123)
+#myvars <- names(bev.imp.missForest) %in% c("Brand.Code")
+#bev.imp.missForest2<- bev.imp.missForest[, !myvars]
+## 75% of the sample size
+smp_size <- floor(0.75 * nrow(bev.imp.missForest))
+## set the seed to make your partition reproducible
+set.seed(123)
+train_ind <- sample(seq_len(nrow(bev.imp.missForest)), size = smp_size)
+bev.train <- bev.imp.missForest[train_ind, ]
+bev.test <- bev.imp.missForest[-train_ind, ]
+bev.trainX <- bev.train[, !names(bev.train) %in% "PH"]
+bev.trainY <- bev.train[,  "PH"]
+bev.testX <- bev.test[, !names(bev.train) %in% "PH"]
+bev.testY <- bev.test[,  "PH"]
+ctrl <- trainControl(method = "cv", number = 10)
+```
+
+
+GLM Model
+
+```{r GLM MODEL, message=FALSE, warning=FALSE, paged.print=FALSE}
+set.seed(456)
+glm.model <- train(PH ~., data = bev.train, metric = "RMSE", method = "glm", preProcess = c("center", "scale", "BoxCox"), trControl = ctrl)
+glm.predict <- predict(glm.model, newdata = bev.test)
+pre.eval <- data.frame(obs = bev.testY, pred = glm.predict)
+glm.results <- data.frame(defaultSummary(pre.eval))
+glm.rmse <- glm.results[1, 1]
+paste0("The RMSE value for the GLM model is ", glm.rmse)
+```
+
+```{r glmnet model, message=FALSE, warning=FALSE, paged.print=FALSE}
+set.seed(789)
+glmnet.model <- train(PH ~., data = bev.train, metric = "RMSE", method = "glmnet", preProcess = c("center", "scale", "BoxCox"), trControl = myControl)
+glmnet.predict <- predict(glmnet.model, newdata = bev.test)
+pre.eval2 <- data.frame(obs = bev.testY, pred = glmnet.predict)
+glmnet.results <- data.frame(defaultSummary(pre.eval2))
+glmnet.rmse <- glmnet.results[1, 1]
+paste0("The RMSE value for the GLMNET model is ", glmnet.rmse)
+```
+
+We will next try partial least squares regression model.
+```{r partial least squares, message=FALSE, warning=FALSE, paged.print=FALSE}
+library(pls)
+pls.bev <- train(PH ~., data = bev.train, metric = "RMSE", method = "pls", tunelength = 15, preProcess = c("center", "scale", "BoxCox"), trControl = myControl)
+pls.pred <- predict(pls.bev, bev.test)
+pre.eval3 <- data.frame(obs = bev.testY, pred = pls.pred)
+defaultSummary(pre.eval3)
+pls.results <- data.frame(defaultSummary(pre.eval3))
+pls.rmse <- pls.results[1, 1]
+paste0("The RMSE value for the PLS model is ", pls.rmse)
+```
+
+```{r random forest, message=FALSE, warning=FALSE, paged.print=FALSE}
+ctrl2 <- trainControl(method = "repeatedcv", number = 5, repeats = 2, search = "random", allowParallel = TRUE)
+mtry <- sqrt(ncol(bev.train))
+set.seed(321)
+ranfor.bev <- train(PH ~., data = bev.train, metric = "RMSE", method = "rf", tunelength = 5, trControl = ctrl2, importance = T)
+
+ranfor.bevPred <- predict(ranfor.bev, newdata = bev.testX)
+postResample(pred = ranfor.bevPred, obs = bev.test$PH) 
+
+varImp(ranfor.bev)
+ranfor.bev
+
+plot(varImp(ranfor.bev))
+```
+
+From the random forest model, we see that the top 5 most important variables are:
+ 
+1. Mnf.Flow         
+2. Brand.CodeC       
+3. Pressure.Vacuum   
+4. Alch.Rel         
+5. Oxygen.Filler
+
+
+The random forest produced an RSME of 0.1
+
+
+XGBoost Model
+
+We decided to try the Extreeme Gradient boosting model because of its high accuracy and optimization to tackle regression problems as it allows optimization of an arbitrary differentiable loss function
+
+Xgboost accepts only numerical predictors, so let's convert the Brandcode to numerical
+.
+```{r boost, message=TRUE, warning=TRUE, paged.print=TRUE}
+
+bev.trainX_num <- bev.trainX
+bev.testX_num <- bev.testX
+bev.trainX_num$Brand.Code <- as.numeric( bev.trainX_num$Brand.Code )
+bev.testX_num$Brand.Code <- as.numeric( bev.testX_num$Brand.Code )
+
+tuneGrid <- expand.grid(.nrounds=c(10,20,50),      # boosting iterations (trees)
+                        .max_depth=c(6, 10, 20),     # max tree depth
+                        .eta=c(0.3, 0.01, 0.1),      # learning rate
+                        .gamma=c(0, 5),              # minimum loss reduction
+                        .colsample_bytree=c(1, 0.5), # subsample ratio of columns
+                        .min_child_weight=c(1, 5),   # minimum sum of instance weight
+                        .subsample=c(0.1, 0.5))      # subsample ratio of rows
+
+set.seed(1)
+bst <- train(x = bev.trainX_num,
+             y = bev.trainY,
+             method = 'xgbTree',
+             tuneGrid = tuneGrid,
+             trControl = trainControl(method='cv'))
+bst$bestTune
+bst$finalModel
+plot(varImp(bst))
+xgboostTunePred <- predict(bst, newdata = bev.testX_num)
+postResample(pred =xgboostTunePred, obs = bev.testY) 
+
+#str(bev.train_num)
+#summary(bev.train)
+```
+
+We clearly see that the most important predictors are 
+1. Mnf.Flow 
+2. Usage.cont
+3. Carb.Flow 
+4. Oxygen.Filler
+5. Carb.Rel
+
+The Xgboost gives an RMSE of 0.11710872
+
+
+MARS model
+We decided to try MARs model because it could predict the values of a continuous dependent or outcome variable from a set of independent or predictor variables.The reason I chose the MARSplines is because it is a nonparametric regression procedure that makes no assumption about the underlying functional relationship between the dependent and independent variables. Since in this case it was not clear if there was linear relationship or not. It is worls even in situations where the relationship between the predictors and the dependent variables is non-monotone and difficult to approximate with parametric models
+
+```{r MARS model}
+marsGrid <- expand.grid(.degree = 1:2, .nprune = 2:38) 
+set.seed(100)
+MarsModel <- train(x = bev.trainX,
+             y = bev.train$PH,
+              method = "earth",
+             tuneGrid = marsGrid,
+             trControl = trainControl(method='cv'))
+MarsModel$bestTune
+plot(varImp(MarsModel))
+MarsModelTunePred <- predict(MarsModel, newdata = bev.testX)
+postResample(pred =MarsModelTunePred, obs = bev.test$PH) 
+
+```
+
+
+
+.
+
+We clearly see that the most important predictors for the MARS model are 
+1. Mnf.Flow 
+2. Brand_code
+3. Airpressure 
+4. Alch.Rel
+5. Bowl.Setpoint
+
+The RSME for this MARS model is 0.12
+
+
+Model Testing
+
+```{r load test data, echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+library(readxl)
+Test_set_bev <- read.csv("https://raw.githubusercontent.com/komotunde/Data624FinalProject/master/FinalTestData.csv",na.strings=c("","NA"))
+
+```
+
+Preprocess test set by imputing missing values
+```{r}
+Test_set_bev$`Brand.Code` <- factor(Test_set_bev$`Brand.Code`)
+set.seed(123)
+myvars <- names(Test_set_bev) %in% c("PH")
+Test_set_bev.missForest<- Test_set_bev[, !myvars]
+summary(Test_set_bev.missForest)
+#make Brand code a factor
+#Test_set_bev.imp <- mice(Test_set_bev, m =3, maxit =3, print = FALSE, seed = 234)
+#Test_set_bev.imp.missForest <- rfImpute(PH ~ ., Test_set_bev)
+#summary(Test_set_bev.imp[1]$data)
+Test_set_bev.missForest2<-missForest(Test_set_bev.missForest)
+summary(Test_set_bev.missForest2$ximp)
+Test_set_bev.imp<-Test_set_bev.missForest2$ximp
+
+```
+
+Use the Random forest model to predict PH because out of all the models it has the lowest RSME
+```{r}
+Test_set_bev.imp$PH <- predict(ranfor.bev, newdata = Test_set_bev.imp)
+summary(Test_set_bev.imp)
+
+write.csv(Test_set_bev.imp, file = "C:/Users/Mezu/Documents/Data624/FinalTestset_Prediction.csv")
+```
+
